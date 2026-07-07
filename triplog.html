@@ -241,10 +241,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
       </button>
     </div>
-    <div class="form-row">
+    <div class="form-row" id="row-reason">
       <div class="form-row-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
       <label class="form-label">Reason</label>
-      <input class="form-input" type="text" id="trip-reason" placeholder="Purpose of trip">
+      <div class="autocomplete-wrap">
+        <input class="form-input" type="text" id="trip-reason" placeholder="Purpose of trip" autocomplete="off" oninput="onReasonInput(this)" onfocus="onReasonFocus()">
+        <div class="autocomplete-dropdown" id="ac-reason" style="display:none"></div>
+      </div>
     </div>
   </div>
   <button class="route-btn" id="route-btn" onclick="findRoutes()">
@@ -260,8 +263,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
       <input class="form-input" type="number" id="trip-km" placeholder="km" inputmode="decimal">
     </div>
     <div class="odo-group">
-      <div class="odo-half"><div class="form-row"><label class="form-label">Odo start</label><input class="form-input" type="number" id="trip-odo-start" placeholder="optional" inputmode="numeric" style="font-size:14px"></div></div>
-      <div class="odo-half"><div class="form-row"><label class="form-label">Odo end</label><input class="form-input" type="number" id="trip-odo-end" placeholder="optional" inputmode="numeric" style="font-size:14px"></div></div>
+      <div class="odo-half"><div class="form-row"><label class="form-label" style="min-width:0;font-size:12px">Start</label><input class="form-input" type="number" id="trip-odo-start" placeholder="odo start" inputmode="numeric" style="font-size:14px"></div></div>
+      <div class="odo-half"><div class="form-row"><label class="form-label" style="min-width:0;font-size:12px">End</label><input class="form-input" type="number" id="trip-odo-end" placeholder="odo end" inputmode="numeric" style="font-size:14px"></div></div>
     </div>
   </div>
   <div class="section-label">Optional costs</div>
@@ -378,6 +381,7 @@ const FSQ_KEY = 'YOUR_FSQ_KEY';
 let trips=JSON.parse(localStorage.getItem('tl_trips')||'[]');
 let settings=JSON.parse(localStorage.getItem('tl_settings')||'{}');
 let savedLocations=JSON.parse(localStorage.getItem('tl_locations')||'[]');
+let savedReasons=JSON.parse(localStorage.getItem('tl_reasons')||'[]');
 let acTimers={};
 let selectedDate=null;
 let calViewYear,calViewMonth;
@@ -385,7 +389,19 @@ let userLat=-33.9249,userLon=18.4241;
 
 if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>{userLat=p.coords.latitude;userLon=p.coords.longitude;},()=>{},{timeout:5000});}
 
-function save(){localStorage.setItem('tl_trips',JSON.stringify(trips));localStorage.setItem('tl_settings',JSON.stringify(settings));localStorage.setItem('tl_locations',JSON.stringify(savedLocations));}
+function save(){localStorage.setItem('tl_trips',JSON.stringify(trips));localStorage.setItem('tl_settings',JSON.stringify(settings));localStorage.setItem('tl_locations',JSON.stringify(savedLocations));localStorage.setItem('tl_reasons',JSON.stringify(savedReasons));}
+function addReason(r){r=r.trim();if(!r)return;const i=savedReasons.findIndex(x=>x.toLowerCase()===r.toLowerCase());if(i>=0)return;savedReasons.unshift(r);if(savedReasons.length>20)savedReasons.pop();}
+function onReasonFocus(){showReasonDD('');}
+function onReasonInput(el){showReasonDD(el.value.trim());}
+function showReasonDD(q){
+  const dd=document.getElementById('ac-reason');
+  const matches=q.length===0?savedReasons:savedReasons.filter(r=>r.toLowerCase().includes(q.toLowerCase()));
+  if(!matches.length){dd.style.display='none';return;}
+  dd.innerHTML=matches.map(r=>`<div class="ac-item" onclick="pickReason('${r.replace(/'/g,"\\'")}')"><svg class="ac-icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><div class="ac-name">${r}</div></div>`).join('');
+  dd.style.display='block';
+}
+function pickReason(r){document.getElementById('trip-reason').value=r;document.getElementById('ac-reason').style.display='none';}
+document.addEventListener('click',e=>{if(!e.target.closest('#row-reason'))document.getElementById('ac-reason').style.display='none';});
 
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -534,6 +550,7 @@ function selectRoute(km,el){
   el.classList.add('selected');
   document.getElementById('trip-km').value=km;
   routeKmLocked=true;
+  calcOdoEnd();
   showToast(`${km} km selected`,'success');
 }
 
@@ -573,6 +590,11 @@ function init(){
   checkOdoBanner();autoCalcKm();renderFavs();updateSavedLocCount();
 }
 let routeKmLocked=false;
+function calcOdoEnd(){
+  const s=document.getElementById('trip-odo-start'),e=document.getElementById('trip-odo-end'),k=document.getElementById('trip-km');
+  const sv=parseFloat(s.value),kv=parseFloat(k.value);
+  if(sv&&kv&&routeKmLocked)e.value=Math.ceil(sv+kv);
+}
 function autoCalcKm(){
   const s=document.getElementById('trip-odo-start'),e=document.getElementById('trip-odo-end'),k=document.getElementById('trip-km');
   s.addEventListener('input',()=>{
@@ -599,13 +621,23 @@ function saveTrip(){
   const km=parseFloat(document.getElementById('trip-km').value);
   const time=document.getElementById('trip-time').value;
   if(!from||!to||!reason||!km){showToast('Fill in from, to, reason, and km','error');return;}
-  trips.unshift({id:Date.now(),date:selectedDate,time:time||'',from,to,reason,km,odoStart:document.getElementById('trip-odo-start').value||null,odoEnd:document.getElementById('trip-odo-end').value||null,fuel:parseFloat(document.getElementById('trip-fuel').value)||0,repairs:parseFloat(document.getElementById('trip-repairs').value)||0});
-  addLocation(from);addLocation(to);save();
+  const tripData={date:selectedDate,time:time||'',from,to,reason,km,odoStart:document.getElementById('trip-odo-start').value||null,odoEnd:document.getElementById('trip-odo-end').value||null,fuel:parseFloat(document.getElementById('trip-fuel').value)||0,repairs:parseFloat(document.getElementById('trip-repairs').value)||0};
+  if(editingTripId){
+    const idx=trips.findIndex(t=>t.id===editingTripId);
+    if(idx>=0)trips[idx]={...trips[idx],...tripData};
+    editingTripId=null;
+    document.querySelector('.btn-primary').innerHTML=`<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg> Save trip`;
+    showToast('Trip updated ✓','success');
+  } else {
+    trips.unshift({id:Date.now(),...tripData});
+    showToast('Trip saved ✓','success');
+  }
+  addLocation(from);addLocation(to);addReason(reason);save();
   ['trip-from','trip-to','trip-reason','trip-km','trip-odo-start','trip-odo-end','trip-fuel','trip-repairs'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('route-btn').classList.remove('visible');
   document.getElementById('route-options').classList.remove('visible');
   routeKmLocked=false;
-  renderFavs();updateSavedLocCount();showToast('Trip saved ✓','success');
+  renderFavs();updateSavedLocCount();
 }
 
 function renderTrips(){
@@ -625,12 +657,36 @@ function renderTrips(){
         <span class="trip-km">${t.km} km</span>
         <div style="display:flex;gap:4px">
           ${i===0?`<button class="trip-delete" title="Continue from here" onclick="continueFromTrip(${t.id})" style="color:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>`:''}
+          <button class="trip-delete" title="Edit trip" onclick="editTrip(${t.id})" style="color:var(--blue)"><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
           <button class="trip-delete" onclick="deleteTrip(${t.id})"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
         </div>
       </div>
     </div>`).join('');
 }
 function deleteTrip(id){if(!confirm('Delete this trip?'))return;trips=trips.filter(t=>t.id!==id);save();renderTrips();showToast('Trip deleted','error');}
+
+let editingTripId=null;
+function editTrip(id){
+  const t=trips.find(t=>t.id===id);
+  if(!t)return;
+  editingTripId=id;
+  showPage('log');
+  selectDate(t.date);
+  document.getElementById('trip-time').value=t.time||'';
+  document.getElementById('trip-from').value=t.from;
+  document.getElementById('trip-to').value=t.to;
+  document.getElementById('trip-reason').value=t.reason;
+  document.getElementById('trip-km').value=t.km;
+  document.getElementById('trip-odo-start').value=t.odoStart||'';
+  document.getElementById('trip-odo-end').value=t.odoEnd||'';
+  document.getElementById('trip-fuel').value=t.fuel||'';
+  document.getElementById('trip-repairs').value=t.repairs||'';
+  routeKmLocked=true;
+  checkRouteBtn();
+  document.querySelector('.btn-primary').innerHTML=`<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update trip`;
+  showToast('Editing trip — make changes and save','success');
+}
+
 function continueFromTrip(id){
   const t=trips.find(t=>t.id===id);
   if(!t)return;
