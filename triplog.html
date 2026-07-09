@@ -374,6 +374,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
   </div>
 </div>
 
+<div class="modal-overlay" id="pluscode-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Name this location</div>
+    <div style="background:var(--bg3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--text2)">Plus Code: <span id="pluscode-display" style="color:var(--accent);font-weight:600"></span></div>
+    <input class="modal-input" type="text" id="pluscode-name" placeholder="e.g. Sanlam Private Wealth">
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closePlusCodeModal()">Cancel</button>
+      <button class="btn-modal-save" onclick="savePlusCodeName()">Save &amp; use</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -436,7 +449,25 @@ function renderFavs(){const tops=getTopLocations(6);const sec=document.getElemen
 function pickLoc(name,field){document.getElementById('trip-'+field).value=name;closeDD(field);checkRouteBtn();}
 
 function onLocFocus(el,field){if(el.value.trim().length<2)showSaved(field,el.value.trim());}
-function onLocInput(el,field){const q=el.value.trim();clearTimeout(acTimers[field]);if(q.length<2){showSaved(field,q);return;}showLoading(field);acTimers[field]=setTimeout(()=>fetchPlaces(q,field),350);}
+function onLocInput(el,field){
+  const q=el.value.trim();
+  clearTimeout(acTimers[field]);
+  if(isPlusCode(q)){
+    const coords=decodePlusCode(q);
+    const dd=document.getElementById('ac-'+field);
+    if(coords){
+      dd.innerHTML=`<div class="ac-item" onclick="openPlusCodeModal('${q}',${JSON.stringify(coords)},'${field}')"><svg class="ac-icon" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><div><div class="ac-name">Plus Code detected</div><div class="ac-addr">Tap to name &amp; save this location</div></div></div>`;
+      dd.style.display='block';
+    } else {
+      dd.innerHTML=`<div class="ac-loading">Could not decode this Plus Code</div>`;
+      dd.style.display='block';
+    }
+    return;
+  }
+  if(q.length<2){showSaved(field,q);return;}
+  showLoading(field);
+  acTimers[field]=setTimeout(()=>fetchPlaces(q,field),350);
+}
 function showLoading(field){const dd=document.getElementById('ac-'+field);dd.innerHTML=`<div class="ac-loading">Searching...</div>`;dd.style.display='block';}
 function showSaved(field,q){const dd=document.getElementById('ac-'+field);const f=q.length===0?getTopLocations(6):savedLocations.filter(l=>l.name.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>b.count-a.count).slice(0,6);if(!f.length){dd.style.display='none';return;}dd.innerHTML=`<div class="ac-section-head">Saved locations</div>`+f.map(l=>acRow(l.name,`Used ${l.count}×`,'saved',field)).join('');dd.style.display='block';}
 function acRow(name,sub,type,field){const safe=name.replace(/'/g,"\\'").replace(/"/g,'&quot;');const icon=type==='saved'?`<svg class="ac-icon ac-saved" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>`:`<svg class="ac-icon ac-place" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>`;return `<div class="ac-item" onclick="pickLoc('${safe}','${field}')">${icon}<div><div class="ac-name">${name}</div>${sub?`<div class="ac-addr">${sub}</div>`:''}</div></div>`;}
@@ -476,6 +507,49 @@ async function fetchPlaces(q,field){
 function closeDD(field){document.getElementById('ac-'+field).style.display='none';}
 document.addEventListener('click',e=>{if(!e.target.closest('#row-from'))closeDD('from');if(!e.target.closest('#row-to'))closeDD('to');});
 
+// ── Plus Code support ──
+function isPlusCode(q){return /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(q.trim().split(' ')[0]);}
+function decodePlusCode(code){
+  const ALPHA='23456789CFGHJMPQRVWX';
+  code=code.toUpperCase().split(' ')[0].trim();
+  const plus=code.indexOf('+');
+  if(plus<4||plus>8)return null;
+  const chars=code.replace('+','');
+  if(chars.length<8)return null;
+  const vals=[...chars].map(c=>ALPHA.indexOf(c));
+  if(vals.some(v=>v<0))return null;
+  const res=[20,1,1/20,1/400];
+  let latLo=-90,lonLo=-180;
+  for(let i=0;i<4;i++){latLo+=vals[i*2]*res[i];lonLo+=vals[i*2+1]*res[i];}
+  let latRes=1/400,lonRes=1/400;
+  if(vals.length>=9){const g=vals[8];latRes=(1/400)/5;lonRes=(1/400)/4;latLo+=Math.floor(g/4)*latRes;lonLo+=(g%4)*lonRes;}
+  return{lat:latLo+latRes/2,lon:lonLo+lonRes/2};
+}
+
+let plusCodePending={code:null,coords:null,field:null};
+function openPlusCodeModal(code,coords,field){
+  plusCodePending={code,coords,field};
+  document.getElementById('pluscode-display').textContent=code;
+  document.getElementById('pluscode-name').value='';
+  document.getElementById('pluscode-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('pluscode-name').focus(),300);
+}
+function closePlusCodeModal(){document.getElementById('pluscode-modal').classList.remove('open');}
+function savePlusCodeName(){
+  const name=document.getElementById('pluscode-name').value.trim();
+  if(!name){showToast('Enter a name for this location','error');return;}
+  const{code,coords,field}=plusCodePending;
+  const i=savedLocations.findIndex(l=>l.name.toLowerCase()===name.toLowerCase());
+  if(i>=0){savedLocations[i].lat=coords.lat;savedLocations[i].lon=coords.lon;savedLocations[i].plusCode=code;savedLocations[i].count++;savedLocations[i].last=Date.now();}
+  else savedLocations.push({name,lat:coords.lat,lon:coords.lon,plusCode:code,count:1,last:Date.now()});
+  save();
+  document.getElementById('trip-'+field).value=name;
+  closePlusCodeModal();
+  checkRouteBtn();
+  showToast(`"${name}" saved`,'success');
+}
+document.getElementById('pluscode-modal').addEventListener('click',function(e){if(e.target===this)closePlusCodeModal();});
+
 function checkRouteBtn(){
   const f=document.getElementById('trip-from').value.trim();
   const t=document.getElementById('trip-to').value.trim();
@@ -490,6 +564,8 @@ document.getElementById('trip-from').addEventListener('input',checkRouteBtn);
 document.getElementById('trip-to').addEventListener('input',checkRouteBtn);
 
 async function geocode(place){
+  const saved=savedLocations.find(l=>l.name.toLowerCase()===place.toLowerCase()&&l.lat&&l.lon);
+  if(saved)return{lat:saved.lat,lon:saved.lon};
   const url=`https://photon.komoot.io/api/?q=${encodeURIComponent(place)}&lat=${userLat}&lon=${userLon}&limit=5&lang=en`;
   const res=await fetch(url);
   const data=await res.json();
