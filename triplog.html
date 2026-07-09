@@ -459,7 +459,7 @@ function onLocInput(el,field){
     decodePlusCode(q).then(coords=>{
       if(coords){
         const safeQ=q.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        dd.innerHTML=`<div class="ac-item" onclick="openPlusCodeModal('${safeQ}',${JSON.stringify(coords)},'${field}')"><svg class="ac-icon" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><div><div class="ac-name">Plus Code detected</div><div class="ac-addr">Tap to name &amp; save this location</div></div></div>`;
+        dd.innerHTML=`<div class="ac-item" onclick="openPlusCodeModal('${safeQ}',${coords.lat},${coords.lon},'${field}')"><svg class="ac-icon" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><div><div class="ac-name">Plus Code detected</div><div class="ac-addr">Tap to name &amp; save this location</div></div></div>`;
       } else {
         dd.innerHTML=`<div class="ac-loading">Could not decode this Plus Code</div>`;
       }
@@ -560,8 +560,8 @@ async function decodePlusCode(rawInput){
 }
 
 let plusCodePending={code:null,coords:null,field:null};
-function openPlusCodeModal(code,coords,field){
-  plusCodePending={code,coords,field};
+function openPlusCodeModal(code,lat,lon,field){
+  plusCodePending={code,coords:{lat,lon},field};
   document.getElementById('pluscode-display').textContent=code;
   document.getElementById('pluscode-name').value='';
   document.getElementById('pluscode-modal').classList.add('open');
