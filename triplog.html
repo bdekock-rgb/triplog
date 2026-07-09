@@ -453,15 +453,17 @@ function onLocInput(el,field){
   const q=el.value.trim();
   clearTimeout(acTimers[field]);
   if(isPlusCode(q)){
-    const coords=decodePlusCode(q);
     const dd=document.getElementById('ac-'+field);
-    if(coords){
-      dd.innerHTML=`<div class="ac-item" onclick="openPlusCodeModal('${q}',${JSON.stringify(coords)},'${field}')"><svg class="ac-icon" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><div><div class="ac-name">Plus Code detected</div><div class="ac-addr">Tap to name &amp; save this location</div></div></div>`;
-      dd.style.display='block';
-    } else {
-      dd.innerHTML=`<div class="ac-loading">Could not decode this Plus Code</div>`;
-      dd.style.display='block';
-    }
+    dd.innerHTML=`<div class="ac-loading">Resolving Plus Code…</div>`;
+    dd.style.display='block';
+    decodePlusCode(q).then(coords=>{
+      if(coords){
+        const safeQ=q.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        dd.innerHTML=`<div class="ac-item" onclick="openPlusCodeModal('${safeQ}',${JSON.stringify(coords)},'${field}')"><svg class="ac-icon" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><div><div class="ac-name">Plus Code detected</div><div class="ac-addr">Tap to name &amp; save this location</div></div></div>`;
+      } else {
+        dd.innerHTML=`<div class="ac-loading">Could not decode this Plus Code</div>`;
+      }
+    }).catch(()=>{dd.innerHTML=`<div class="ac-loading">Could not decode this Plus Code</div>`;});
     return;
   }
   if(q.length<2){showSaved(field,q);return;}
@@ -508,13 +510,10 @@ function closeDD(field){document.getElementById('ac-'+field).style.display='none
 document.addEventListener('click',e=>{if(!e.target.closest('#row-from'))closeDD('from');if(!e.target.closest('#row-to'))closeDD('to');});
 
 // ── Plus Code support ──
-function isPlusCode(q){return /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(q.trim().split(' ')[0]);}
-function decodePlusCode(code){
+function isPlusCode(q){return /^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{2,}/i.test(q.trim().split(' ')[0]);}
+function _olcDecode(fullCode){
   const ALPHA='23456789CFGHJMPQRVWX';
-  code=code.toUpperCase().split(' ')[0].trim();
-  const plus=code.indexOf('+');
-  if(plus<4||plus>8)return null;
-  const chars=code.replace('+','');
+  const chars=fullCode.replace('+','');
   if(chars.length<8)return null;
   const vals=[...chars].map(c=>ALPHA.indexOf(c));
   if(vals.some(v=>v<0))return null;
@@ -524,6 +523,40 @@ function decodePlusCode(code){
   let latRes=1/400,lonRes=1/400;
   if(vals.length>=9){const g=vals[8];latRes=(1/400)/5;lonRes=(1/400)/4;latLo+=Math.floor(g/4)*latRes;lonLo+=(g%4)*lonRes;}
   return{lat:latLo+latRes/2,lon:lonLo+lonRes/2};
+}
+function _expandShortCode(shortCode,refLat,refLon){
+  const ALPHA='23456789CFGHJMPQRVWX';
+  const plusIdx=shortCode.indexOf('+');
+  if(plusIdx===8)return shortCode;
+  const need=8-plusIdx;
+  let lat=refLat+90,lon=refLon+180;
+  const res=[20,1,1/20,1/400];
+  let prefix='';
+  for(let i=0;i<4;i++){
+    prefix+=ALPHA[Math.floor(lat/res[i])%20]+ALPHA[Math.floor(lon/res[i])%20];
+    lat=lat%res[i];lon=lon%res[i];
+    if(prefix.length>=need)break;
+  }
+  return prefix.slice(0,need)+shortCode;
+}
+async function decodePlusCode(rawInput){
+  const parts=rawInput.trim().split(/\s+/);
+  const code=parts[0].toUpperCase();
+  const cityRef=parts.slice(1).join(' ');
+  const plusIdx=code.indexOf('+');
+  if(plusIdx<0)return null;
+  if(plusIdx===8)return _olcDecode(code);
+  // Short code — need reference location
+  let refLat=userLat,refLon=userLon;
+  if(cityRef){
+    try{
+      const r=await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(cityRef)}&limit=1&lang=en`);
+      const d=await r.json();
+      if(d.features?.length){const[lo,la]=d.features[0].geometry.coordinates;refLat=la;refLon=lo;}
+    }catch(e){}
+  }
+  const full=_expandShortCode(code,refLat,refLon);
+  return _olcDecode(full);
 }
 
 let plusCodePending={code:null,coords:null,field:null};
