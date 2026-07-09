@@ -8,7 +8,24 @@
 <meta name="apple-mobile-web-app-title" content="TripLog">
 <meta name="theme-color" content="#0f0f0f">
 <title>TripLog</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
+.map-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:600;flex-direction:column}
+.map-modal-overlay.open{display:flex}
+.map-modal-header{background:var(--bg2);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid var(--border);flex-shrink:0}
+.map-modal-title{font-size:16px;font-weight:600}
+.map-modal-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.map-modal-close{background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;padding:4px 8px}
+#map-container{flex:1;min-height:0}
+.map-modal-footer{background:var(--bg2);padding:12px 16px calc(12px + var(--safe-bottom));border-top:0.5px solid var(--border);display:flex;gap:10px;flex-shrink:0}
+.map-confirm-btn{flex:1;padding:14px;background:var(--accent);border:none;border-radius:10px;color:#0a2010;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;opacity:.4;pointer-events:none}
+.map-confirm-btn.ready{opacity:1;pointer-events:auto}
+.map-cancel-btn{padding:14px 20px;background:var(--bg3);border:0.5px solid var(--border);border-radius:10px;color:var(--text2);font-size:15px;font-family:inherit;cursor:pointer}
+.map-pin-btn{background:none;border:none;padding:6px;cursor:pointer;color:var(--text3);flex-shrink:0;display:flex;align-items:center}
+.map-pin-btn:active{color:var(--accent)}
+.map-pin-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+</style>
 :root{
   --bg:#0f0f0f;--bg2:#1a1a1a;--bg3:#242424;--bg4:#2e2e2e;
   --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
@@ -232,6 +249,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
       <button class="gps-btn" id="gps-from-btn" onclick="useGPS('from')">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
       </button>
+      <button class="map-pin-btn" onclick="openMapPicker('from')" title="Pick on map">
+        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+      </button>
     </div>
     <div class="form-row" id="row-to">
       <div class="form-row-icon"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
@@ -242,6 +262,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
       </div>
       <button class="gps-btn" id="gps-to-btn" onclick="useGPS('to')">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      </button>
+      <button class="map-pin-btn" onclick="openMapPicker('to')" title="Pick on map">
+        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
       </button>
     </div>
     <div class="form-row" id="row-reason">
@@ -371,6 +394,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;backg
       <button class="btn-modal-cancel" onclick="closeVehicleModal()">Cancel</button>
       <button class="btn-modal-save" onclick="saveVehicle()">Save</button>
     </div>
+  </div>
+</div>
+
+<div class="map-modal-overlay" id="map-modal">
+  <div class="map-modal-header">
+    <div>
+      <div class="map-modal-title" id="map-modal-title">Pick location</div>
+      <div class="map-modal-sub">Tap the map to drop a pin</div>
+    </div>
+    <button class="map-modal-close" onclick="closeMapPicker()">✕</button>
+  </div>
+  <div id="map-container"></div>
+  <div class="map-modal-footer">
+    <button class="map-cancel-btn" onclick="closeMapPicker()">Cancel</button>
+    <button class="map-confirm-btn" id="map-confirm-btn" onclick="confirmMapPin()">Confirm location</button>
   </div>
 </div>
 
@@ -788,6 +826,57 @@ function confirmClearLocations(){if(confirm(`Clear all ${savedLocations.length} 
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),2400);}
 
 document.getElementById('vehicle-modal').addEventListener('click',function(e){if(e.target===this)closeVehicleModal();});
+
+let mapInstance=null,mapMarker=null,mapPickerField=null,mapPinCoords=null;
+function openMapPicker(field){
+  mapPickerField=field;
+  mapPinCoords=null;
+  document.getElementById('map-modal-title').textContent=field==='from'?'Pick starting point':'Pick destination';
+  document.getElementById('map-confirm-btn').classList.remove('ready');
+  document.getElementById('map-modal').classList.add('open');
+  setTimeout(()=>{
+    if(!mapInstance){
+      mapInstance=L.map('map-container').setView([userLat,userLon],14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(mapInstance);
+      mapInstance.on('click',onMapClick);
+    } else {
+      mapInstance.invalidateSize();
+      mapInstance.setView([userLat,userLon],14);
+    }
+  },50);
+}
+function closeMapPicker(){
+  document.getElementById('map-modal').classList.remove('open');
+}
+async function onMapClick(e){
+  const{lat,lng}=e.latlng;
+  mapPinCoords={lat,lon:lng};
+  if(mapMarker)mapMarker.setLatLng([lat,lng]);
+  else mapMarker=L.marker([lat,lng]).addTo(mapInstance);
+  document.getElementById('map-confirm-btn').classList.add('ready');
+  try{
+    const res=await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`);
+    const data=await res.json();
+    const p=data.features?.[0]?.properties||{};
+    const name=p.name||p.street||'';
+    const number=p.housenumber?p.housenumber+' ':'';
+    const street=p.street||'';
+    const label=name?(street&&name!==street?`${name}, ${number}${street}`:`${number}${name}`):`${number}${street}`.trim()||`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    mapMarker.bindPopup(label).openPopup();
+    mapPinCoords.label=label;
+  }catch(e){
+    mapPinCoords.label=`${lat.toFixed(5)}, ${e.latlng?.lng?.toFixed(5)||lng.toFixed(5)}`;
+  }
+}
+function confirmMapPin(){
+  if(!mapPinCoords)return;
+  const label=mapPinCoords.label||`${mapPinCoords.lat.toFixed(5)}, ${mapPinCoords.lon.toFixed(5)}`;
+  document.getElementById('trip-'+mapPickerField).value=label;
+  if(mapPickerField==='from')userLat=mapPinCoords.lat,userLon=mapPinCoords.lon;
+  closeMapPicker();
+  checkRouteBtn();
+  showToast('Location pinned','success');
+}
 
 init();
 </script>
